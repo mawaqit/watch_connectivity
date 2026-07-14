@@ -8,6 +8,9 @@ class GarminInitializationOptions {
   /// The id of the companion application to communicate with
   final String applicationId;
 
+  /// Other Connect IQ application ids to register alongside [applicationId]
+  final List<String> additionalApplicationIds;
+
   /// URL scheme of the iOS companion application
   final String urlScheme;
 
@@ -27,6 +30,7 @@ class GarminInitializationOptions {
   /// Constructor
   const GarminInitializationOptions({
     required this.applicationId,
+    this.additionalApplicationIds = const [],
     required this.urlScheme,
     this.autoUI = false,
     this.connectType = GarminIqConnectionType.wireless,
@@ -35,12 +39,13 @@ class GarminInitializationOptions {
 
   /// Convert to JSON
   Map<String, dynamic> toJson() => {
-        'applicationId': applicationId,
-        'urlScheme': urlScheme,
-        'autoUI': autoUI,
-        'connectType': connectType.name.constantCase,
-        'adbPort': adbPort,
-      };
+    'applicationId': applicationId,
+    'additionalApplicationIds': additionalApplicationIds,
+    'urlScheme': urlScheme,
+    'autoUI': autoUI,
+    'connectType': connectType.name.constantCase,
+    'adbPort': adbPort,
+  };
 }
 
 /// Enum for type of Garmin connection to establish
@@ -49,5 +54,5 @@ enum GarminIqConnectionType {
   tethered,
 
   /// Wireless connection
-  wireless;
+  wireless,
 }

@@ -8,12 +8,15 @@ public class WatchConnectivityGarminPlugin: NSObject, FlutterPlugin, IQDeviceEve
   let connectIQ = ConnectIQ.sharedInstance()!
   let defaults = UserDefaults.standard
   let messageHandler = StreamHandler()
+  let applicationMessageHandler = StreamHandler()
   let contextHandler = StreamHandler()
   var applicationId: String?
+  var applicationIds = [String]()
   var urlScheme: String?
 
-  init(messageChannel: FlutterEventChannel, contextChannel: FlutterEventChannel) {
+  init(messageChannel: FlutterEventChannel, applicationMessageChannel: FlutterEventChannel, contextChannel: FlutterEventChannel) {
     messageChannel.setStreamHandler(messageHandler)
+    applicationMessageChannel.setStreamHandler(applicationMessageHandler)
     contextChannel.setStreamHandler(contextHandler)
 
     super.init()
@@ -22,8 +25,9 @@ public class WatchConnectivityGarminPlugin: NSObject, FlutterPlugin, IQDeviceEve
   public static func register(with registrar: FlutterPluginRegistrar) {
     let methodChannel = FlutterMethodChannel(name: "watch_connectivity_garmin/methods", binaryMessenger: registrar.messenger())
     let messageChannel = FlutterEventChannel(name: "watch_connectivity_garmin/messages", binaryMessenger: registrar.messenger())
+    let applicationMessageChannel = FlutterEventChannel(name: "watch_connectivity_garmin/application_messages", binaryMessenger: registrar.messenger())
     let contextChannel = FlutterEventChannel(name: "watch_connectivity_garmin/context", binaryMessenger: registrar.messenger())
-    let instance = WatchConnectivityGarminPlugin(messageChannel: messageChannel, contextChannel: contextChannel)
+    let instance = WatchConnectivityGarminPlugin(messageChannel: messageChannel, applicationMessageChannel: applicationMessageChannel, contextChannel: contextChannel)
     registrar.addMethodCallDelegate(instance, channel: methodChannel)
     registrar.addApplicationDelegate(instance)
   }
@@ -44,6 +48,8 @@ public class WatchConnectivityGarminPlugin: NSObject, FlutterPlugin, IQDeviceEve
       showDeviceSelection(result)
     case "sendMessage":
       sendMessage(call, result)
+    case "sendMessageToApplication":
+      sendMessageToApplication(call, result)
     // Not implemented
     default:
       result(FlutterMethodNotImplemented)
@@ -74,8 +80,11 @@ public class WatchConnectivityGarminPlugin: NSObject, FlutterPlugin, IQDeviceEve
     return defaults.stringArray(forKey: Self.deviceIdsKey)?.map { IQDevice(id: UUID(uuidString: $0), modelName: "", friendlyName: "")! } ?? []
   }
 
-  private func createApps() -> [IQApp] {
-    return getCachedDevices().map { IQApp(uuid: UUID(uuidString: applicationId!)!, store: UUID(), device: $0) }
+  private func createApps(applicationId targetApplicationId: String? = nil) -> [IQApp] {
+    let targetIds = targetApplicationId.map { [$0] } ?? applicationIds
+    return getCachedDevices().flatMap { device in
+      targetIds.map { IQApp(uuid: UUID(uuidString: $0)!, store: UUID(), device: device) }
+    }
   }
 
   private func registerForEvents() {
@@ -92,6 +101,11 @@ public class WatchConnectivityGarminPlugin: NSObject, FlutterPlugin, IQDeviceEve
   private func initialize(_ call: FlutterMethodCall, _ result: FlutterResult) {
     let args = call.arguments as! [String: Any]
     applicationId = args["applicationId"] as? String
+    let additionalApplicationIds = args["additionalApplicationIds"] as? [String] ?? []
+    applicationIds = [applicationId!]
+    for id in additionalApplicationIds where !applicationIds.contains(id) {
+      applicationIds.append(id)
+    }
     urlScheme = args["urlScheme"] as? String
 
     let autoUI = args["autoUI"] as? Bool ?? false
@@ -121,7 +135,7 @@ public class WatchConnectivityGarminPlugin: NSObject, FlutterPlugin, IQDeviceEve
   }
 
   private func isReachableAsync(_ result: FlutterResult) async {
-    let apps = createApps()
+    let apps = createApps(applicationId: applicationId)
     for app in apps {
       let installed = await withCheckedContinuation { continuation in
         connectIQ.getAppStatus(app) { status in
@@ -138,16 +152,27 @@ public class WatchConnectivityGarminPlugin: NSObject, FlutterPlugin, IQDeviceEve
   }
 
   private func sendMessage(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
-    Task { await sendMessageAsync(call, result) }
+    Task { await sendMessageAsync(applicationId: applicationId, message: call.arguments, result) }
   }
 
-  private func sendMessageAsync(_ call: FlutterMethodCall, _ result: FlutterResult) async {
-    guard applicationId != nil else {
+  private func sendMessageToApplication(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
+    let args = call.arguments as! [String: Any]
+    let targetApplicationId = args["applicationId"] as? String
+    guard let targetApplicationId, applicationIds.contains(targetApplicationId) else {
+      result(FlutterError(code: "Unknown application", message: nil, details: targetApplicationId))
+      return
+    }
+
+    Task { await sendMessageAsync(applicationId: targetApplicationId, message: args["message"], result) }
+  }
+
+  private func sendMessageAsync(applicationId targetApplicationId: String?, message: Any?, _ result: FlutterResult) async {
+    guard let targetApplicationId else {
       result(FlutterError(code: "Not Initialized", message: nil, details: nil))
       return
     }
 
-    let connectedApps = createApps().filter { connectIQ.getDeviceStatus($0.device) == .connected }
+    let connectedApps = createApps(applicationId: targetApplicationId).filter { connectIQ.getDeviceStatus($0.device) == .connected }
 
     guard !connectedApps.isEmpty else {
       result(FlutterError(code: "No connected devices", message: nil, details: nil))
@@ -157,7 +182,7 @@ public class WatchConnectivityGarminPlugin: NSObject, FlutterPlugin, IQDeviceEve
     var errors = [String]()
     for app in connectedApps {
       await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-        connectIQ.sendMessage(call.arguments, to: app, progress: { _, _ in }) { result in
+        connectIQ.sendMessage(message, to: app, progress: { _, _ in }) { result in
           if result != .success {
             errors.append("\(result)")
           }
@@ -178,7 +203,14 @@ public class WatchConnectivityGarminPlugin: NSObject, FlutterPlugin, IQDeviceEve
   }
 
   public func receivedMessage(_ message: Any!, from app: IQApp!) {
-    messageHandler.success(message)
+    let sourceApplicationId = app.uuid.uuidString.lowercased()
+    if sourceApplicationId == applicationId?.lowercased() {
+      messageHandler.success(message)
+    }
+    applicationMessageHandler.success([
+      "applicationId": sourceApplicationId,
+      "message": message as Any,
+    ])
   }
 }
 

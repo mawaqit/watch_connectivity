@@ -52,3 +52,7 @@
 ## 0.1.0
 
 - Initial release
+## Mawaqit fork
+
+* Add multi-application initialization and targeted message delivery.
+* Add source-aware application messages while preserving `messageStream`.

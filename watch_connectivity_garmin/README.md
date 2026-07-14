@@ -1,5 +1,22 @@
 A wrapper for the ConnectIQ SDK to communicate with Garmin watches
 
+## Multiple Connect IQ applications
+
+Keep the existing `applicationId` as the primary target and register other
+application IDs during initialization:
+
+```dart
+await watch.initialize(const GarminInitializationOptions(
+  applicationId: watchAppId,
+  additionalApplicationIds: [dataFieldId],
+  urlScheme: 'example',
+));
+```
+
+`sendMessage()` and `messageStream` retain their original behavior. Use
+`sendMessageToApplication()` for a specific target and
+`applicationMessageStream` when the source application ID is required.
+
 ## NOTE
 
 By using this plugin, you accept the [ConnectIQ license agreement](https://developer.garmin.com/connect-iq/sdk/).
