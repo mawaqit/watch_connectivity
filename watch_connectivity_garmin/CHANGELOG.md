@@ -1,3 +1,9 @@
+# Mawaqit fork
+
+* Register multiple Connect IQ application IDs.
+* Add targeted application sends and source-aware application messages.
+* Add a Garmin device connection stream.
+
 ## 0.1.12
 
 - Supports SwiftPM
@@ -52,7 +58,3 @@
 ## 0.1.0
 
 - Initial release
-## Mawaqit fork
-
-* Add multi-application initialization and targeted message delivery.
-* Add source-aware application messages while preserving `messageStream`.

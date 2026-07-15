@@ -25,11 +25,13 @@ class WatchConnectivityGarminPlugin : FlutterPlugin, MethodCallHandler {
 
     val messageHandler = StreamHandler()
     val applicationMessageHandler = StreamHandler()
+    val deviceConnectionHandler = StreamHandler()
     val contextHandler = StreamHandler()
 
     private lateinit var methodChannel: MethodChannel
     private lateinit var messageChannel: EventChannel
     private lateinit var applicationMessageChannel: EventChannel
+    private lateinit var deviceConnectionChannel: EventChannel
     private lateinit var contextChannel: EventChannel
     private lateinit var context: Context
     private lateinit var packageManager: PackageManager
@@ -44,11 +46,16 @@ class WatchConnectivityGarminPlugin : FlutterPlugin, MethodCallHandler {
             flutterPluginBinding.binaryMessenger,
             "$channelName/application_messages"
         )
+        deviceConnectionChannel = EventChannel(
+            flutterPluginBinding.binaryMessenger,
+            "$channelName/device_connections"
+        )
         contextChannel = EventChannel(flutterPluginBinding.binaryMessenger, "$channelName/context")
 
         methodChannel.setMethodCallHandler(this)
         messageChannel.setStreamHandler(messageHandler)
         applicationMessageChannel.setStreamHandler(applicationMessageHandler)
+        deviceConnectionChannel.setStreamHandler(deviceConnectionHandler)
         contextChannel.setStreamHandler(contextHandler)
 
         context = flutterPluginBinding.applicationContext
@@ -60,6 +67,7 @@ class WatchConnectivityGarminPlugin : FlutterPlugin, MethodCallHandler {
         methodChannel.setMethodCallHandler(null)
         messageChannel.setStreamHandler(null)
         applicationMessageChannel.setStreamHandler(null)
+        deviceConnectionChannel.setStreamHandler(null)
         contextChannel.setStreamHandler(null)
         connectIQ.shutdown(context)
     }
@@ -133,6 +141,7 @@ class WatchConnectivityGarminPlugin : FlutterPlugin, MethodCallHandler {
     }
 
     private fun processDeviceStatus(device: IQDevice, status: IQDevice.IQDeviceStatus) {
+        deviceConnectionHandler.success(status == IQDevice.IQDeviceStatus.CONNECTED)
         if (status == IQDevice.IQDeviceStatus.CONNECTED) {
             for ((applicationId, iqApp) in iqApps) {
                 connectIQ.registerForAppEvents(device, iqApp) { _, _, data, messageStatus ->
@@ -216,6 +225,10 @@ class WatchConnectivityGarminPlugin : FlutterPlugin, MethodCallHandler {
 
     private fun sendMessage(iqApp: IQApp, message: Any?, result: Result) {
         val devices = connectIQ.connectedDevices ?: listOf()
+        if (devices.isEmpty()) {
+            result.error("No connected devices", "No Garmin device is connected", null)
+            return
+        }
 
         thread {
             val latch = CountDownLatch(devices.count())

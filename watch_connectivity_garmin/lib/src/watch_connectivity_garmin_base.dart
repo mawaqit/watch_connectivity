@@ -31,6 +31,9 @@ class WatchConnectivityGarmin extends WatchConnectivityBase {
   final _applicationMessageChannel = const EventChannel(
     'watch_connectivity_garmin/application_messages',
   );
+  final _deviceConnectionChannel = const EventChannel(
+    'watch_connectivity_garmin/device_connections',
+  );
 
   @override
   Stream<Map<String, dynamic>> get contextStream =>
@@ -46,6 +49,15 @@ class WatchConnectivityGarmin extends WatchConnectivityBase {
             'applicationMessages-${identityHashCode(this)}',
           )
           .map((event) => GarminApplicationMessage.fromMap(event as Map));
+
+  /// Connection changes for Garmin devices known to the Connect IQ SDK.
+  ///
+  /// Emits `true` when a device connects and `false` when it disconnects.
+  late final Stream<bool> deviceConnectionStream = _deviceConnectionChannel
+      .receiveBroadcastStream(
+        'deviceConnections-${identityHashCode(this)}',
+      )
+      .map((event) => event as bool);
 
   /// Initialize the platform SDK
   Future<void> initialize(GarminInitializationOptions options) {

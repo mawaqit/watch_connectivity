@@ -17,6 +17,10 @@ await watch.initialize(const GarminInitializationOptions(
 `sendMessageToApplication()` for a specific target and
 `applicationMessageStream` when the source application ID is required.
 
+Listen to `deviceConnectionStream` when cached data should be replayed after a
+Garmin device reconnects. It emits `true` for connected status changes and
+`false` for disconnected status changes.
+
 ## NOTE
 
 By using this plugin, you accept the [ConnectIQ license agreement](https://developer.garmin.com/connect-iq/sdk/).

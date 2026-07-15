@@ -9,14 +9,16 @@ public class WatchConnectivityGarminPlugin: NSObject, FlutterPlugin, IQDeviceEve
   let defaults = UserDefaults.standard
   let messageHandler = StreamHandler()
   let applicationMessageHandler = StreamHandler()
+  let deviceConnectionHandler = StreamHandler()
   let contextHandler = StreamHandler()
   var applicationId: String?
   var applicationIds = [String]()
   var urlScheme: String?
 
-  init(messageChannel: FlutterEventChannel, applicationMessageChannel: FlutterEventChannel, contextChannel: FlutterEventChannel) {
+  init(messageChannel: FlutterEventChannel, applicationMessageChannel: FlutterEventChannel, deviceConnectionChannel: FlutterEventChannel, contextChannel: FlutterEventChannel) {
     messageChannel.setStreamHandler(messageHandler)
     applicationMessageChannel.setStreamHandler(applicationMessageHandler)
+    deviceConnectionChannel.setStreamHandler(deviceConnectionHandler)
     contextChannel.setStreamHandler(contextHandler)
 
     super.init()
@@ -26,8 +28,9 @@ public class WatchConnectivityGarminPlugin: NSObject, FlutterPlugin, IQDeviceEve
     let methodChannel = FlutterMethodChannel(name: "watch_connectivity_garmin/methods", binaryMessenger: registrar.messenger())
     let messageChannel = FlutterEventChannel(name: "watch_connectivity_garmin/messages", binaryMessenger: registrar.messenger())
     let applicationMessageChannel = FlutterEventChannel(name: "watch_connectivity_garmin/application_messages", binaryMessenger: registrar.messenger())
+    let deviceConnectionChannel = FlutterEventChannel(name: "watch_connectivity_garmin/device_connections", binaryMessenger: registrar.messenger())
     let contextChannel = FlutterEventChannel(name: "watch_connectivity_garmin/context", binaryMessenger: registrar.messenger())
-    let instance = WatchConnectivityGarminPlugin(messageChannel: messageChannel, applicationMessageChannel: applicationMessageChannel, contextChannel: contextChannel)
+    let instance = WatchConnectivityGarminPlugin(messageChannel: messageChannel, applicationMessageChannel: applicationMessageChannel, deviceConnectionChannel: deviceConnectionChannel, contextChannel: contextChannel)
     registrar.addMethodCallDelegate(instance, channel: methodChannel)
     registrar.addApplicationDelegate(instance)
   }
@@ -199,7 +202,7 @@ public class WatchConnectivityGarminPlugin: NSObject, FlutterPlugin, IQDeviceEve
   }
 
   public func deviceStatusChanged(_ device: IQDevice!, status: IQDeviceStatus) {
-    // Don't care
+    deviceConnectionHandler.success(status == .connected)
   }
 
   public func receivedMessage(_ message: Any!, from app: IQApp!) {
