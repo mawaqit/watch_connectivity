@@ -80,7 +80,10 @@ public class WatchConnectivityGarminPlugin: NSObject, FlutterPlugin, IQDeviceEve
   }
 
   private func getCachedDevices() -> [IQDevice] {
-    return defaults.stringArray(forKey: Self.deviceIdsKey)?.map { IQDevice(id: UUID(uuidString: $0), modelName: "", friendlyName: "")! } ?? []
+    return defaults.stringArray(forKey: Self.deviceIdsKey)?.compactMap {
+      guard let uuid = UUID(uuidString: $0) else { return nil }
+      return IQDevice(id: uuid, modelName: "", friendlyName: "")
+    } ?? []
   }
 
   private func createApps(applicationId targetApplicationId: String? = nil) -> [IQApp] {

@@ -69,7 +69,9 @@ class WatchConnectivityGarminPlugin : FlutterPlugin, MethodCallHandler {
         applicationMessageChannel.setStreamHandler(null)
         deviceConnectionChannel.setStreamHandler(null)
         contextChannel.setStreamHandler(null)
-        connectIQ.shutdown(context)
+        if (::connectIQ.isInitialized) {
+            connectIQ.shutdown(context)
+        }
     }
 
     override fun onMethodCall(call: MethodCall, result: Result) {
@@ -191,10 +193,16 @@ class WatchConnectivityGarminPlugin : FlutterPlugin, MethodCallHandler {
     }
 
     private fun isPaired(result: Result) {
+        if (!ensureInitialized(result)) {
+            return
+        }
         result.success(connectIQ.knownDevices?.isNotEmpty() ?: false)
     }
 
     private fun isReachable(result: Result) {
+        if (!ensureInitialized(result)) {
+            return
+        }
         thread {
             for (device in connectIQ.connectedDevices ?: listOf()) {
                 val installedApp = getApplicationForDevice(device, primaryIqApp)
@@ -209,10 +217,16 @@ class WatchConnectivityGarminPlugin : FlutterPlugin, MethodCallHandler {
 
 
     private fun sendMessage(call: MethodCall, result: Result) {
+        if (!ensureInitialized(result)) {
+            return
+        }
         sendMessage(primaryIqApp, call.arguments, result)
     }
 
     private fun sendMessageToApplication(call: MethodCall, result: Result) {
+        if (!ensureInitialized(result)) {
+            return
+        }
         val applicationId = call.argument<String>("applicationId")!!
         val iqApp = iqApps[applicationId]
         if (iqApp == null) {
@@ -250,6 +264,15 @@ class WatchConnectivityGarminPlugin : FlutterPlugin, MethodCallHandler {
                 result.success(null)
             }
         }
+    }
+
+    private fun ensureInitialized(result: Result): Boolean {
+        if (::connectIQ.isInitialized && ::primaryIqApp.isInitialized) {
+            return true
+        }
+
+        result.error("Not Initialized", "Garmin SDK is not initialized", null)
+        return false
     }
 }
 
