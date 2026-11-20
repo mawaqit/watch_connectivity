@@ -1,6 +1,7 @@
 package dev.rexios.watch_connectivity_garmin
 
 import android.content.Context
+import android.util.Log
 import android.content.pm.PackageManager
 import com.garmin.android.connectiq.ConnectIQ
 import com.garmin.android.connectiq.ConnectIQ.ConnectIQListener
@@ -23,6 +24,7 @@ import kotlin.concurrent.thread
 /** WatchConnectivityGarminPlugin */
 class WatchConnectivityGarminPlugin : FlutterPlugin, MethodCallHandler {
     private val channelName = "watch_connectivity_garmin"
+    private val logTag = "WatchConnectivityGarmin"
 
     val messageHandler = StreamHandler()
     val applicationMessageHandler = StreamHandler()
@@ -115,9 +117,21 @@ class WatchConnectivityGarminPlugin : FlutterPlugin, MethodCallHandler {
             call.argument<Boolean>("autoUI")!!,
             object : ConnectIQListener {
                 override fun onSdkReady() {
-                    // Register again on every reconnect: the restarted service
-                    // has dropped our device and app listeners.
-                    listenForMessages()
+                    // Register again on every reconnect: Garmin Connect's
+                    // restarted service no longer knows our app registrations.
+                    try {
+                        listenForMessages()
+                    } catch (e: Exception) {
+                        // The service can die again right after binding. The
+                        // SDK's exceptions are checked, so nothing above us
+                        // catches them and they would crash the app.
+                        if (replied.compareAndSet(false, true)) {
+                            result.error("Service unavailable", e.toString(), null)
+                        } else {
+                            Log.w(logTag, "Unable to listen for Garmin messages after reconnect", e)
+                        }
+                        return
+                    }
                     if (replied.compareAndSet(false, true)) {
                         result.success(null)
                     }
@@ -215,14 +229,20 @@ class WatchConnectivityGarminPlugin : FlutterPlugin, MethodCallHandler {
             return
         }
         thread {
-            for (device in connectIQ.connectedDevices ?: listOf()) {
-                val installedApp = getApplicationForDevice(device, primaryIqApp)
-                if (installedApp != null) {
-                    result.success(true)
-                    return@thread
+            // An exception thrown on this thread would crash the app, e.g.
+            // when Garmin Connect's service is down.
+            try {
+                for (device in connectIQ.connectedDevices ?: listOf()) {
+                    val installedApp = getApplicationForDevice(device, primaryIqApp)
+                    if (installedApp != null) {
+                        result.success(true)
+                        return@thread
+                    }
                 }
+                result.success(false)
+            } catch (e: Exception) {
+                result.error("Service unavailable", e.toString(), null)
             }
-            result.success(false)
         }
     }
 
@@ -256,23 +276,29 @@ class WatchConnectivityGarminPlugin : FlutterPlugin, MethodCallHandler {
         }
 
         thread {
-            val latch = CountDownLatch(devices.count())
-            val errors = mutableListOf<ConnectIQ.IQMessageStatus>()
-            for (device in devices) {
-                connectIQ.sendMessage(device, iqApp, message) { _, _, status ->
-                    if (status != ConnectIQ.IQMessageStatus.SUCCESS) {
-                        errors.add(status)
+            // An exception thrown on this thread would crash the app, e.g.
+            // when Garmin Connect's service is down.
+            try {
+                val latch = CountDownLatch(devices.count())
+                val errors = mutableListOf<ConnectIQ.IQMessageStatus>()
+                for (device in devices) {
+                    connectIQ.sendMessage(device, iqApp, message) { _, _, status ->
+                        if (status != ConnectIQ.IQMessageStatus.SUCCESS) {
+                            errors.add(status)
+                        }
+
+                        latch.countDown()
                     }
-
-                    latch.countDown()
                 }
-            }
 
-            latch.await()
-            if (errors.isNotEmpty()) {
-                result.error(errors.toString(), "Unable to send message", null)
-            } else {
-                result.success(null)
+                latch.await()
+                if (errors.isNotEmpty()) {
+                    result.error(errors.toString(), "Unable to send message", null)
+                } else {
+                    result.success(null)
+                }
+            } catch (e: Exception) {
+                result.error("Service unavailable", e.toString(), null)
             }
         }
     }

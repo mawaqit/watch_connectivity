@@ -4,6 +4,7 @@
 * Add targeted application sends and source-aware application messages.
 * Add a Garmin device connection stream.
 * Fix an Android crash ("Reply already submitted") when Garmin Connect restarts after `initialize`.
+* Fix Android crashes when Garmin Connect's service is unavailable during `initialize`, `isReachable` or a send.
 
 ## 0.1.12
 
