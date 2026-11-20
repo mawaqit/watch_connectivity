@@ -16,6 +16,7 @@ import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import io.flutter.plugin.common.MethodChannel.Result
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
 
@@ -105,17 +106,27 @@ class WatchConnectivityGarminPlugin : FlutterPlugin, MethodCallHandler {
         val connectTypeString = call.argument<String>("connectType")!!
         val connectType = IQConnectType.valueOf(connectTypeString)
         connectIQ = ConnectIQ.getInstance(context, connectType)
+        // The SDK calls onSdkReady each time it (re)binds to Garmin Connect's
+        // service, e.g. after Garmin Connect restarts. A method call can only be
+        // answered once, so reply on the first callback and ignore the rest.
+        val replied = AtomicBoolean(false)
         connectIQ.initialize(
             context,
             call.argument<Boolean>("autoUI")!!,
             object : ConnectIQListener {
                 override fun onSdkReady() {
+                    // Register again on every reconnect: the restarted service
+                    // has dropped our device and app listeners.
                     listenForMessages()
-                    result.success(null)
+                    if (replied.compareAndSet(false, true)) {
+                        result.success(null)
+                    }
                 }
 
                 override fun onInitializeError(status: IQSdkErrorStatus?) {
-                    result.error(status.toString(), "Unable to initialize Garmin SDK", null)
+                    if (replied.compareAndSet(false, true)) {
+                        result.error(status.toString(), "Unable to initialize Garmin SDK", null)
+                    }
                 }
 
                 override fun onSdkShutDown() {}

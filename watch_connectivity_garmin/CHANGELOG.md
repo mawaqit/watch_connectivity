@@ -3,6 +3,7 @@
 * Register multiple Connect IQ application IDs.
 * Add targeted application sends and source-aware application messages.
 * Add a Garmin device connection stream.
+* Fix an Android crash ("Reply already submitted") when Garmin Connect restarts after `initialize`.
 
 ## 0.1.12
 
