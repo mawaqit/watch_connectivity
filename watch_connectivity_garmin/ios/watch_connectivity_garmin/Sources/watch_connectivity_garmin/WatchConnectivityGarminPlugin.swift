@@ -4,6 +4,8 @@ import UIKit
 
 public class WatchConnectivityGarminPlugin: NSObject, FlutterPlugin, IQDeviceEventDelegate, IQAppMessageDelegate {
   private static let deviceIdsKey = "watch_connectivity_garmin/deviceIds"
+  private static let appStatusTimeout: TimeInterval = 10
+  private static let sendMessageTimeout: TimeInterval = 60
 
   let connectIQ = ConnectIQ.sharedInstance()!
   let defaults = UserDefaults.standard
@@ -137,15 +139,16 @@ public class WatchConnectivityGarminPlugin: NSObject, FlutterPlugin, IQDeviceEve
   }
 
   private func isReachable(_ result: @escaping FlutterResult) {
-    Task { await isReachableAsync(result) }
+    Task { @MainActor in await isReachableAsync(result) }
   }
 
+  @MainActor
   private func isReachableAsync(_ result: FlutterResult) async {
     let apps = createApps(applicationId: applicationId)
     for app in apps {
-      let installed = await withCheckedContinuation { continuation in
+      let installed = await awaitFirstCallback(timeout: Self.appStatusTimeout, fallback: false) { done in
         connectIQ.getAppStatus(app) { status in
-          continuation.resume(returning: status?.isInstalled == true)
+          done(status?.isInstalled == true)
         }
       }
       if installed {
@@ -158,7 +161,7 @@ public class WatchConnectivityGarminPlugin: NSObject, FlutterPlugin, IQDeviceEve
   }
 
   private func sendMessage(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
-    Task { await sendMessageAsync(applicationId: applicationId, message: call.arguments, result) }
+    Task { @MainActor in await sendMessageAsync(applicationId: applicationId, message: call.arguments, result) }
   }
 
   private func sendMessageToApplication(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
@@ -169,9 +172,10 @@ public class WatchConnectivityGarminPlugin: NSObject, FlutterPlugin, IQDeviceEve
       return
     }
 
-    Task { await sendMessageAsync(applicationId: targetApplicationId, message: args["message"], result) }
+    Task { @MainActor in await sendMessageAsync(applicationId: targetApplicationId, message: args["message"], result) }
   }
 
+  @MainActor
   private func sendMessageAsync(applicationId targetApplicationId: String?, message: Any?, _ result: FlutterResult) async {
     guard let targetApplicationId else {
       result(FlutterError(code: "Not Initialized", message: nil, details: nil))
@@ -187,13 +191,17 @@ public class WatchConnectivityGarminPlugin: NSObject, FlutterPlugin, IQDeviceEve
 
     var errors = [String]()
     for app in connectedApps {
-      await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+      let sendResult = await awaitFirstCallback(timeout: Self.sendMessageTimeout, fallback: IQSendMessageResult?.none) { done in
         connectIQ.sendMessage(message, to: app, progress: { _, _ in }) { result in
-          if result != .success {
-            errors.append("\(result)")
-          }
-          continuation.resume()
+          done(result)
         }
+      }
+      if let sendResult {
+        if sendResult != .success {
+          errors.append("\(sendResult)")
+        }
+      } else {
+        errors.append("timeout")
       }
     }
 
@@ -201,6 +209,29 @@ public class WatchConnectivityGarminPlugin: NSObject, FlutterPlugin, IQDeviceEve
       result(nil)
     } else {
       result(FlutterError(code: "Error sending message", message: errors.joined(separator: ", "), details: nil))
+    }
+  }
+
+  /// Waits for a Connect IQ completion block and returns its first value.
+  ///
+  /// The Connect IQ iOS SDK can call a completion block more than once (for example once from its
+  /// own timeout and again when the late reply arrives). Resuming a continuation twice is a fatal
+  /// error, so later calls are ignored. If the SDK never calls back, `fallback` is returned after
+  /// `timeout` seconds. Runs on the main actor because the SDK is not thread-safe.
+  @MainActor
+  private func awaitFirstCallback<T>(
+    timeout: TimeInterval,
+    fallback: T,
+    _ start: (@escaping (T) -> Void) -> Void
+  ) async -> T {
+    await withCheckedContinuation { continuation in
+      let once = ResumeOnce(continuation)
+      DispatchQueue.main.asyncAfter(deadline: .now() + timeout) {
+        once.resume(returning: fallback)
+      }
+      start { value in
+        once.resume(returning: value)
+      }
     }
   }
 
@@ -221,6 +252,24 @@ public class WatchConnectivityGarminPlugin: NSObject, FlutterPlugin, IQDeviceEve
 }
 
 class IQUIOverrideDelegateStub: NSObject, IQUIOverrideDelegate {}
+
+/// Resumes a continuation at most once; later calls are ignored. Thread-safe.
+final class ResumeOnce<T> {
+  private let lock = NSLock()
+  private var continuation: CheckedContinuation<T, Never>?
+
+  init(_ continuation: CheckedContinuation<T, Never>) {
+    self.continuation = continuation
+  }
+
+  func resume(returning value: T) {
+    lock.lock()
+    let pending = continuation
+    continuation = nil
+    lock.unlock()
+    pending?.resume(returning: value)
+  }
+}
 
 class StreamHandler: NSObject, FlutterStreamHandler {
   private var sinks: [String: FlutterEventSink] = [:]
