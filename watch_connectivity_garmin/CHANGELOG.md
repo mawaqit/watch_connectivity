@@ -5,6 +5,7 @@
 * Add a Garmin device connection stream.
 * Fix an Android crash ("Reply already submitted") when Garmin Connect restarts after `initialize`.
 * Fix Android crashes when Garmin Connect's service is unavailable during `initialize`, `isReachable` or a send.
+* Fix iOS crashes when the Connect IQ SDK calls an `isReachable` or send completion more than once; SDK calls now run on the main thread and time out if the SDK never answers.
 
 ## 0.1.12
 
