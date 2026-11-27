@@ -3,6 +3,8 @@ package dev.rexios.watch_connectivity_garmin
 import android.content.Context
 import android.util.Log
 import android.content.pm.PackageManager
+import android.os.Handler
+import android.os.Looper
 import com.garmin.android.connectiq.ConnectIQ
 import com.garmin.android.connectiq.ConnectIQ.ConnectIQListener
 import com.garmin.android.connectiq.ConnectIQ.IQApplicationInfoListener
@@ -41,6 +43,7 @@ class WatchConnectivityGarminPlugin : FlutterPlugin, MethodCallHandler {
     private lateinit var connectIQ: ConnectIQ
     private lateinit var primaryIqApp: IQApp
     private val iqApps = linkedMapOf<String, IQApp>()
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         methodChannel = MethodChannel(flutterPluginBinding.binaryMessenger, "$channelName/methods")
@@ -170,24 +173,34 @@ class WatchConnectivityGarminPlugin : FlutterPlugin, MethodCallHandler {
     private fun processDeviceStatus(device: IQDevice, status: IQDevice.IQDeviceStatus) {
         deviceConnectionHandler.success(status == IQDevice.IQDeviceStatus.CONNECTED)
         if (status == IQDevice.IQDeviceStatus.CONNECTED) {
-            for ((applicationId, iqApp) in iqApps) {
-                connectIQ.registerForAppEvents(device, iqApp) { _, _, data, messageStatus ->
-                    if (messageStatus != ConnectIQ.IQMessageStatus.SUCCESS) {
-                        return@registerForAppEvents
-                    }
-                    for (datum in data) {
-                        if (applicationId == primaryIqApp.applicationId) {
-                            messageHandler.success(datum)
-                        }
-                        applicationMessageHandler.success(
-                            mapOf("applicationId" to applicationId, "message" to datum)
-                        )
-                    }
-                }
-            }
+            registerForAppEvents(device)
         } else {
             for (iqApp in iqApps.values) {
                 connectIQ.unregisterForApplicationEvents(device, iqApp)
+            }
+        }
+    }
+
+    // Tells Garmin Connect to forward messages from our watch apps on this
+    // device. Garmin Connect only learns this from registerForAppEvents, so a
+    // missed "device connected" broadcast (some OEM battery managers filter
+    // broadcasts to background apps) leaves watch messages undelivered until
+    // the next registration. Safe to call repeatedly: the SDK replaces the
+    // listener for the same device and app.
+    private fun registerForAppEvents(device: IQDevice) {
+        for ((applicationId, iqApp) in iqApps) {
+            connectIQ.registerForAppEvents(device, iqApp) { _, _, data, messageStatus ->
+                if (messageStatus != ConnectIQ.IQMessageStatus.SUCCESS) {
+                    return@registerForAppEvents
+                }
+                for (datum in data) {
+                    if (applicationId == primaryIqApp.applicationId) {
+                        messageHandler.success(datum)
+                    }
+                    applicationMessageHandler.success(
+                        mapOf("applicationId" to applicationId, "message" to datum)
+                    )
+                }
             }
         }
     }
@@ -232,7 +245,22 @@ class WatchConnectivityGarminPlugin : FlutterPlugin, MethodCallHandler {
             // An exception thrown on this thread would crash the app, e.g.
             // when Garmin Connect's service is down.
             try {
-                for (device in connectIQ.connectedDevices ?: listOf()) {
+                val connectedDevices = connectIQ.connectedDevices ?: listOf()
+                // The app asks isReachable on every start, resume and sync, so
+                // refresh the message registration here. It doesn't emit a
+                // device connection event, which would trigger another sync.
+                // Registration runs on the main thread, where the SDK's
+                // receiver reads its listener maps.
+                mainHandler.post {
+                    for (device in connectedDevices) {
+                        try {
+                            registerForAppEvents(device)
+                        } catch (e: Exception) {
+                            Log.w(logTag, "Unable to refresh Garmin app event registration", e)
+                        }
+                    }
+                }
+                for (device in connectedDevices) {
                     val installedApp = getApplicationForDevice(device, primaryIqApp)
                     if (installedApp != null) {
                         result.success(true)

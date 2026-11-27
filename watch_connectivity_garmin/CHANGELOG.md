@@ -6,6 +6,7 @@
 * Fix an Android crash ("Reply already submitted") when Garmin Connect restarts after `initialize`.
 * Fix Android crashes when Garmin Connect's service is unavailable during `initialize`, `isReachable` or a send.
 * Fix iOS crashes when the Connect IQ SDK calls an `isReachable` or send completion more than once; SDK calls now run on the main thread and time out if the SDK never answers.
+* Android: refresh watch app message registration on every `isReachable`, so watch-to-phone messages keep arriving when a "device connected" broadcast was missed.
 
 ## 0.1.12
 
